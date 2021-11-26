@@ -5,31 +5,52 @@ import itertools
 import os
 import os.path
 
-
-coord_min = np.array([0,0], float)
-coord_max = np.array([200, 100], float)
+# набор узлов и получающихся КЭ
 nodes = {}
 mesh_elems = {}
+# форма области задана жестко - это прямоугльник, строящийся по двум точкам coord_min и coord_max
+coord_min = np.array([0,0], float)
+coord_max = np.array([200, 100], float)
+
+# служебная инфа, диспользуется непосредственно в решении
 mesh_B_dict ={}
 mesh_list_dict = {}
 teta_grad = {}
-on_s_t = {}
-on_s_q = {}
-on_s_s = {}
+teta = []
 q = {}
+
+# в качестве КЭ используется равнобедренный прямоугольный треугольник, длинна стороны которго = h
 h = int(input("Введите размер конечного элемента: "))
-f_gl_std = []
+
+#параметры  области
 lambda_ = 100
 alpha_t = 10
 f_h = 0
 q_h = 10
 teta_inf = 293
-teta_e = 298.15
-aelem = []
-j_ptr = []
-i_ptr = []
-teta = []
-ksi = 0.0001
+'''
+    учет  граничных условий - считаем, что возможны только условия 2го и 3го рода
+    При этом помним, что ГУ 2го рода - это то же самое, что и ГУ 3го с 0-вой конвективной частью
+    справа заданы ГУ 3го рода
+    q = q_h;  alpha = alpha_t
+    слева заданы ГУ 2го рода:
+    q = q_h;  alpha = 0
+    сверху и снизу заданы ГУ 2го рода:
+    q =  0; alpha = 0
+    
+    получается, в задаче рассматриваются как бы 3 поверхности, на которых разные значения q и  alpha
+    упорядочим эти поверхности - введем для каждой индекс:
+     0 - правая граница
+     1 - левая граница
+     2 - верхняя или нижняя граница
+     
+     значения q и  alpha для каждой границы запишутся в массивы
+     по соответствующим индексам.
+     эти массивы используются непосредственно при решении задачи.
+     
+'''
+q_bounds = [q_h, q_h, 0]
+alpha_bounds = [0, alpha_t, 0]
 
 # триангуляция заданной области
 
@@ -70,57 +91,8 @@ def triangulation():
             mesh_elems.update({counter_mesh + 1: np.array([coord_up[1], coord_down[0], coord_down[1]])})
             counter_mesh += 2
 
-
-# список узлов конечного элемента, лежащих на правой границе
-def on_sigma_right (idx_el):
-    node_list = mesh_elems.get(idx_el)
-    curve = []
-    buf = 0
-    for i in range(3):
-        if  nodes.get(node_list[i])[0] == coord_max[0]:
-            curve.append(node_list[i])
-        else:
-            buf = node_list[i]
-    if len(curve) == 2:
-        curve.append(buf)
-        return curve
-    else:
-        return []
-
-# список узлов конечного элемента, лежащих на левой границе
-
-def on_sigma_left (idx_el):
-    node_list = mesh_elems.get(idx_el)
-    curve = []
-    buf = 0
-    for i in range(3):
-        if  nodes.get(node_list[i])[0] == coord_min[0]:
-            curve.append(node_list[i])
-        else:
-            buf = node_list[i]
-    if len(curve) == 2:
-        curve.append(buf)
-        return curve
-    else:
-        return []
-
-#список узлов конечного элемента, лежащих на верхней и нижней границе
-
-def on_sigma_up_down(idx_el):
-    node_list = mesh_elems.get(idx_el)
-    curve = []
-    buf = 0
-    for i in range(3):
-        if  nodes.get(node_list[i])[1] == coord_min[1] or nodes.get(node_list[i])[1] == coord_max[1]:
-            curve.append(node_list[i])
-        else:
-            buf = node_list[i]
-    if len(curve) == 2:
-        curve.append(buf)
-        return curve
-    else:
-        return []
-
+# функция , осуществляющая проверку того, что узлы выбранного КЭ лежат на выбранной границе
+# непосредственное осуществление проверки в соответствии с заданными признаками
 
 def on_sigma_nodes_list(treshold, idx_el,idx_coord):
     node_list = mesh_elems.get(idx_el)
@@ -136,6 +108,9 @@ def on_sigma_nodes_list(treshold, idx_el,idx_coord):
         return curve
     else:
         return []
+
+# функция , осуществляющая проверку того, что узлы выбранного КЭ лежат на выбранной границе -
+# в данной функции задается набор признаков для проверки
 
 def on_sigma_nodes(idx_surf, idx_el):
     # список узлов конечного элемента, лежащих на левой границе
@@ -181,97 +156,12 @@ def calc_L(v1,v2):
 
 # сборка глобальной матрицы
 
-def create_global_system1():
-    #gl_matr_std    = np.zeros(len(nodes)*len(nodes)).reshape(len(nodes),len(nodes))
-    mesh_L_dict = {}
-    mesh_S_dict = {}
-    mesh_alpha_dict = {}
-    q_h_buf = 0
-    alpha_t_buf = 0
-    for i in range(len(mesh_elems)):
-        node_list = []
-        '''
-        учет  граничных условий:
-        справа заданы ГУ 3го рода
-        q = 10; 0; 0; alpha_t = 4
-        слева, сверху и снизу заданы ГУ 2го рода:
-        q = 10; 0; 0; alpha_t = 0
-        '''
-        #тут ошибка
-        sigma_s_elems = on_sigma_left(i)
-        if len(sigma_s_elems) != 0:
-            q_h_buf = q_h
-            alpha_t_buf = 0
-        else:
-            sigma_s_elems = on_sigma_right(i)
-            if len(sigma_s_elems) != 0:
-                q_h_buf = q_h
-                alpha_t_buf = alpha_t
-            else:
-                sigma_s_elems = on_sigma_up_down(i)
-                if len(sigma_s_elems) != 0:
-                    q_h_buf = 0
-                    alpha_t_buf = 0
-        S = 0
-        L = 0
-
-        if len(sigma_s_elems) != 0:
-            print(sigma_s_elems)
-            node_list.append(sigma_s_elems[2])
-            node_list.append(sigma_s_elems[0])
-            node_list.append(sigma_s_elems[1])
-            L = calc_L(sigma_s_elems[0], sigma_s_elems[1])
-        else:
-            node_list = mesh_elems.get(i).copy()
-        B = baricentric(node_list.copy())
-        S = calc_S(node_list[0], node_list[1], node_list[2])
-        #
-        f = (f_h*S/3)*np.array([1.0,1.0,1.0])-((q_h_buf+alpha_t_buf*teta_inf)*L/2)*np.array([0.0,1.0,1.0])
-        mesh_alpha_dict.update({i: alpha_t_buf})
-        mesh_B_dict.update({i: B})
-        mesh_list_dict.update({i: node_list})
-        mesh_L_dict.update({i: L})
-        mesh_S_dict.update({i: S})
-        for j in range(3):
-            f_gl_std[node_list[j]] += f[j]
-
-    for i in range(len(mesh_elems)):
-        B = mesh_B_dict.get(i).copy().T
-        B_t = mesh_B_dict.get(i)[:, 1:]
-        B = B[1:, :]
-        alpha_t_buf = mesh_alpha_dict.get(i)
-        G = lambda_ * mesh_S_dict.get(i) * np.dot(B_t, B) - alpha_t_buf * (mesh_L_dict.get(i) / 6) * np.array(
-            [[0.0, 0.0, 0.0], [0.0, 2.0, 1.0, ], [0.0, 1.0, 2.0, ]])
-
-        for j in range(3):
-            i_gl = mesh_list_dict.get(i)[j]
-            for k in range(3):
-                j_gl = mesh_list_dict.get(i)[k]
-                gl_matr_std[i_gl, j_gl] += G[j, k]
-
-
-    i_ptr.append(0)
-    for i in range(len(nodes)):
-        for j in range(len(nodes)):
-            if gl_matr_std[i,j] != 0:
-                aelem.append(gl_matr_std[i,j])
-                j_ptr.append(j)
-        i_ptr.append(len(aelem))
-
 def create_global_system():
-    #gl_matr_std    = np.zeros(len(nodes)*len(nodes)).reshape(len(nodes),len(nodes))
     mesh_L_dict = {}
+    mesh_zero_coord_dict = {}
     mesh_S_dict = {}
-    q_bounds = [q_h,q_h,0]
-    alpha_bounds = [0,alpha_t,0]
-
-    '''
-            учет  граничных условий:
-            справа заданы ГУ 3го рода
-            q = 10; 0; 0; alpha_t = 4
-            слева, сверху и снизу заданы ГУ 2го рода:
-            q = 10; 0; 0; alpha_t = 0
-            '''
+    M_buf = np.array(
+        [[2.0, 1.0, 1.0], [1.0, 2.0, 1.0, ], [1.0, 1.0, 2.0, ]])
     for i in range(len(mesh_elems)):
         node_list = mesh_elems.get(i).copy()
         S = calc_S(node_list[0], node_list[1], node_list[2])
@@ -309,7 +199,7 @@ def create_global_system():
             buf_vec[zero_coord[j]] = 0;
             f -= ((q_bounds[j]+alpha_bounds[j]*teta_inf)*L[j]/2)*buf_vec
         mesh_L_dict.update({i: L.copy()})
-
+        mesh_zero_coord_dict.update({i: zero_coord})
         for j in range(3):
             f_gl_std[node_list[j]] += f[j]
 
@@ -317,10 +207,15 @@ def create_global_system():
         B = mesh_B_dict.get(i).copy().T
         B_t = mesh_B_dict.get(i)[:, 1:]
         B = B[1:, :]
-
-        G = lambda_ * mesh_S_dict.get(i) * np.dot(B_t, B) - alpha_bounds[0] * (mesh_L_dict.get(i)[0] / 6) * np.array(
-            [[0.0, 0.0, 0.0], [0.0, 2.0, 1.0, ], [0.0, 1.0, 2.0, ]])- alpha_bounds[1] * (mesh_L_dict.get(i)[1] / 6) * np.array(
-            [[0.0, 0.0, 0.0], [0.0, 2.0, 1.0, ], [0.0, 1.0, 2.0, ]])
+        M_list = [M_buf.copy(),M_buf.copy(),M_buf.copy() ]
+        for j in range(3):
+            zero_idx = mesh_zero_coord_dict.get(i)[j]
+            for k in range(3):
+                M_list[j][zero_idx][k] = 0
+                M_list[j][k][zero_idx] = 0
+                
+        G = lambda_ * mesh_S_dict.get(i) * np.dot(B_t, B) - alpha_bounds[0] * (mesh_L_dict.get(i)[0] / 6) * M_list[0] \
+            - alpha_bounds[1] * (mesh_L_dict.get(i)[1] / 6) * M_list[1]- alpha_bounds[2] * (mesh_L_dict.get(i)[2] / 6) * M_list[2]
 
         for j in range(3):
             i_gl = mesh_list_dict.get(i)[j]
@@ -356,7 +251,7 @@ def find_approximation():
          teta_grad.update({i: buf_teta1.copy()})
          q.update({i: buf_teta1.copy()*lambda_})
 
-# вывод результата в файл формата mv2
+# вывод результата в файл формата mv2 - для визуаизации
 
 def print_in_mv2():
     with open("D://result_mke.txt",'w') as file:
@@ -387,13 +282,10 @@ def print_in_mv2():
 # решение поставленной задачи
 
 triangulation()
-
 f_gl_std = np.zeros(len(nodes))
 gl_matr_std   = np.zeros(len(nodes)*len(nodes)).reshape(len(nodes),len(nodes))
-
 create_global_system()
 teta = np.linalg.solve(gl_matr_std , f_gl_std)
-
 find_approximation()
 print_in_mv2()
 
