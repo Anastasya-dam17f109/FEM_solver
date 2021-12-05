@@ -4,6 +4,7 @@ import math
 import itertools
 import os
 import os.path
+import json
 
 # набор узлов и получающихся КЭ
 nodes = {}
@@ -12,22 +13,25 @@ mesh_elems = {}
 coord_min = np.array([0,0], float)
 coord_max = np.array([200, 100], float)
 
-# служебная инфа, диспользуется непосредственно в решении
+# служебная информация, диспользуется непосредственно в решении
 mesh_B_dict ={}
 mesh_list_dict = {}
 teta_grad = {}
 teta = []
 q = {}
 
-# в качестве КЭ используется равнобедренный прямоугольный треугольник, длинна стороны которго = h
-h = int(input("Введите размер конечного элемента: "))
+with open("task.json", 'r') as task_file:
+	task = json.load(task_file)
 
-#параметры  области
-lambda_ = 100
-alpha_t = 10
-f_h = 0
-q_h = 10
-teta_inf = 293
+# в качестве КЭ используется равнобедренный прямоугольный треугольник, длинна стороны которго = h
+h = task["h"]
+
+# параметры  области
+lambda_ = task["lambda"]
+alpha_t = task["alpha_t"]
+f_h = task["f_h"]
+q_h = task["q_h"]
+teta_inf = task["teta_inf"]
 '''
     учет  граничных условий - считаем, что возможны только условия 2го и 3го рода
     При этом помним, что ГУ 2го рода - это то же самое, что и ГУ 3го с 0-вой конвективной частью
@@ -37,17 +41,17 @@ teta_inf = 293
     q = q_h;  alpha = 0
     сверху и снизу заданы ГУ 2го рода:
     q =  0; alpha = 0
-    
+
     получается, в задаче рассматриваются как бы 3 поверхности, на которых разные значения q и  alpha
     упорядочим эти поверхности - введем для каждой индекс:
      0 - правая граница
      1 - левая граница
      2 - верхняя или нижняя граница
-     
+
      значения q и  alpha для каждой границы запишутся в массивы
      по соответствующим индексам.
      эти массивы используются непосредственно при решении задачи.
-     
+
 '''
 q_bounds = [q_h, q_h, 0]
 alpha_bounds = [0, alpha_t, 0]
@@ -213,7 +217,7 @@ def create_global_system():
             for k in range(3):
                 M_list[j][zero_idx][k] = 0
                 M_list[j][k][zero_idx] = 0
-                
+
         G = lambda_ * mesh_S_dict.get(i) * np.dot(B_t, B) - alpha_bounds[0] * (mesh_L_dict.get(i)[0] / 6) * M_list[0] \
             - alpha_bounds[1] * (mesh_L_dict.get(i)[1] / 6) * M_list[1]- alpha_bounds[2] * (mesh_L_dict.get(i)[2] / 6) * M_list[2]
 
@@ -254,7 +258,7 @@ def find_approximation():
 # вывод результата в файл формата mv2 - для визуаизации
 
 def print_in_mv2():
-    with open("D://result_mke.txt",'w') as file:
+    with open("./result_mke.txt",'w') as file:
         file.write(str(len(nodes))+' 3 5 teta grad_t_x grad_t_y  q_x q_y  \n')
         for i in range(len(nodes)):
             str_buf1 = ''
@@ -274,9 +278,9 @@ def print_in_mv2():
             file.write(str(i + 1) + ' ' + str_buf1 + '0 1 0\n')
 
     file.close()
-    if os.path.exists("D://result_mke.mv2"):
-        os.remove("D://result_mke.mv2")
-    os.rename("D://result_mke.txt","D://result_mke.mv2")
+    if os.path.exists("./result_mke.mv2"):
+        os.remove("./result_mke.mv2")
+    os.rename("./result_mke.txt","./result_mke.mv2")
 
 
 # решение поставленной задачи
@@ -288,6 +292,3 @@ create_global_system()
 teta = np.linalg.solve(gl_matr_std , f_gl_std)
 find_approximation()
 print_in_mv2()
-
-
-
